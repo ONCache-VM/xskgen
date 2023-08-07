@@ -480,7 +480,6 @@ static void usage(const char *prog)
 		"    -c    run in copy mode\n"
 		"    -d    debug mode: single packet, sleep between them\n"
 		"    -q    rx-tx queue number\n",
-		"    -t    tx only, don't install xdp bpf program\n"
 		"    -r    don't install dummy xdp (rx) program\n",
 		"    -R    number of entries in fill/comp/rx/tx rings (per ring)\n",
 		"    -m    request tx offloads\n",
