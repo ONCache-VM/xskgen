@@ -54,6 +54,8 @@
 #endif
 
 static bool debug;
+static bool fill_meta;
+static bool request_meta;
 static int batch_size = 256;
 static bool busy_poll;
 static int pkt_size = 1400;
@@ -80,7 +82,7 @@ static struct in6_addr daddr;
 static __u16 sport;
 static __u16 dport;
 
-static int open_xsk(int ifindex, struct xsk *xsk, __u32 qid, int bind_flags, bool request_meta)
+static int open_xsk(int ifindex, struct xsk *xsk, __u32 qid, int bind_flags)
 {
 	int mmap_flags = MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE;
 	struct xsk_ring_prod *fill = &xsk->fill;
@@ -207,7 +209,7 @@ static int open_xsk(int ifindex, struct xsk *xsk, __u32 qid, int bind_flags, boo
 
 	/* specify tx metadata size */
 
-	if (request_meta) {
+	if (fill_meta) {
 		optval = sizeof(struct xsk_tx_metadata);
 		err = setsockopt(xsk->fd, SOL_XDP, XDP_TX_METADATA_LEN,
 				 &optval, sizeof(optval));
@@ -263,7 +265,7 @@ static int dummy_rx(int ifindex)
 	return bpf_xdp_attach(ifindex, prog_fd, XDP_FLAGS_DRV_MODE | XDP_FLAGS_REPLACE, NULL);
 }
 
-static void fill_packet(struct xsk *xsk, __u32 idx, bool request_meta)
+static void fill_packet(struct xsk *xsk, __u32 idx)
 {
 	struct xsk_tx_metadata *meta;
 	struct ipv6hdr *ip6h = NULL;
@@ -276,11 +278,11 @@ static void fill_packet(struct xsk *xsk, __u32 idx, bool request_meta)
 
 	tx_desc = xsk_ring_prod__tx_desc(&xsk->tx, idx);
 	tx_desc->addr = idx * UMEM_FRAME_SIZE;
-	if (request_meta)
+	if (fill_meta)
 		tx_desc->addr += sizeof(struct xsk_tx_metadata);
 	data = xsk_umem__get_data(xsk->umem_area, tx_desc->addr);
 
-	if (request_meta) {
+	if (fill_meta) {
 		meta = data - sizeof(struct xsk_tx_metadata);
 		memset(meta, 0, sizeof(*meta));
 
@@ -311,23 +313,24 @@ static void fill_packet(struct xsk *xsk, __u32 idx, bool request_meta)
 
 	memset((void *)(udph + 1), (__u8)idx, pkt_size);
 
-	if (request_meta) {
+	if (fill_meta) {
 		meta->flags |= XDP_TX_METADATA_CHECKSUM;
 		meta->csum_start = sizeof(*eth) + sizeof(*ip6h);
 		meta->csum_offset = offsetof(struct udphdr, check);
-		tx_desc->options |= XDP_TX_METADATA;
+		if (request_meta)
+			tx_desc->options |= XDP_TX_METADATA;
 	} else {
 		udph->check = csum_fold(csum_partial(udph, sizeof(*udph) + pkt_size, 0));
 	}
 	tx_desc->len = ETH_HLEN + sizeof(*ip6h) + sizeof(*udph) + pkt_size;
 }
 
-static void populate_umem(struct xsk *xsk, bool request_meta)
+static void populate_umem(struct xsk *xsk)
 {
 	__u32 i;
 
 	for (i = 0; i < umem_size; i++)
-		fill_packet(xsk, i, request_meta);
+		fill_packet(xsk, i);
 }
 
 static void close_xsk(struct xsk *xsk)
@@ -481,6 +484,7 @@ static void usage(const char *prog)
 		"    -r    don't install dummy xdp (rx) program\n",
 		"    -R    number of entries in fill/comp/rx/tx rings (per ring)\n",
 		"    -m    request tx offloads\n",
+		"    -M    fill tx offloads but don't set XDP_TX_METADATA\n",
 		"    -l    stop after sending given number of packets\n",
 		"    -s    packet payload size (1400 is default)\n",
 		"    -U    number of entries in umem\n",
@@ -490,7 +494,6 @@ static void usage(const char *prog)
 int main(int argc, char *argv[])
 {
 	int bind_flags =  XDP_USE_NEED_WAKEUP | XDP_ZEROCOPY;
-	bool request_meta = false;
 	bool install_rx = true;
 	long long limit = -1;
 	struct xsk xsk;
@@ -503,7 +506,7 @@ int main(int argc, char *argv[])
 
 	struct bpf_program *prog;
 
-	while ((opt = getopt(argc, argv, "bB:cdq:rR:l:ms:U:")) != -1) {
+	while ((opt = getopt(argc, argv, "bB:cdq:rR:l:mMs:U:")) != -1) {
 		switch (opt) {
 		case 'b':
 			busy_poll = true;
@@ -531,6 +534,10 @@ int main(int argc, char *argv[])
 			break;
 		case 'm':
 			request_meta = true;
+			fill_meta = true;
+			break;
+		case 'M':
+			fill_meta = true;
 			break;
 		case 'l':
 			limit = atoll(optarg);
@@ -574,12 +581,13 @@ int main(int argc, char *argv[])
 	printf(" ifindex=%d", ifindex);
 	printf(" qid=%d", qid);
 	printf(" bind_flags=%x", bind_flags);
+	printf(" fill_meta=%d", fill_meta);
 	printf(" request_meta=%d", request_meta);
 	printf(" ring_size=%d", ring_size);
 	printf(" umem_size=%d", umem_size);
 	printf("\n");
 
-	ret = open_xsk(ifindex, &xsk, qid, bind_flags, request_meta);
+	ret = open_xsk(ifindex, &xsk, qid, bind_flags);
 	if (ret)
 		error(1, -ret, "open_xsk");
 
@@ -593,7 +601,7 @@ int main(int argc, char *argv[])
 	printf("xsk->fd=%d\n", xsk.fd);
 
 	printf("populate_umem\n");
-	populate_umem(&xsk, request_meta);
+	populate_umem(&xsk);
 
 	printf("generate_tx, press any key to exit...\n");
 	generate_tx(&xsk, limit);
