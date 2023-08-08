@@ -55,6 +55,8 @@
 
 static bool debug;
 static bool fill_meta;
+static bool fill_csum = true;
+static bool fill_tstamp = true;
 static bool request_meta;
 static int batch_size = 256;
 static bool busy_poll;
@@ -285,9 +287,6 @@ static void fill_packet(struct xsk *xsk, __u32 idx)
 	if (fill_meta) {
 		meta = data - sizeof(struct xsk_tx_metadata);
 		memset(meta, 0, sizeof(*meta));
-
-		/* request and ignore tx timestamp */
-		meta->flags = XDP_TX_METADATA_TIMESTAMP;
 	}
 
 	eth = data;
@@ -314,9 +313,15 @@ static void fill_packet(struct xsk *xsk, __u32 idx)
 	memset((void *)(udph + 1), (__u8)idx, pkt_size);
 
 	if (fill_meta) {
-		meta->flags |= XDP_TX_METADATA_CHECKSUM;
-		meta->csum_start = sizeof(*eth) + sizeof(*ip6h);
-		meta->csum_offset = offsetof(struct udphdr, check);
+		if (fill_tstamp) {
+			meta->flags |= XDP_TX_METADATA_CHECKSUM;
+			meta->csum_start = sizeof(*eth) + sizeof(*ip6h);
+			meta->csum_offset = offsetof(struct udphdr, check);
+		}
+
+		if (fill_csum)
+			meta->flags = XDP_TX_METADATA_TIMESTAMP;
+
 		if (request_meta)
 			tx_desc->options |= XDP_TX_METADATA;
 	} else {
@@ -478,6 +483,7 @@ static void usage(const char *prog)
 		"    -b    run in busy polling mode\n"
 		"    -B    number of packets to submit at the same time\n"
 		"    -c    run in copy mode\n"
+		"    -C    do _not_ request checksum offload\n",
 		"    -d    debug mode: single packet, sleep between them\n"
 		"    -q    rx-tx queue number\n",
 		"    -r    don't install dummy xdp (rx) program\n",
@@ -486,6 +492,7 @@ static void usage(const char *prog)
 		"    -M    fill tx offloads but don't set XDP_TX_METADATA\n",
 		"    -l    stop after sending given number of packets\n",
 		"    -s    packet payload size (1400 is default)\n",
+		"    -T    do _not_ request tx timestamp\n",
 		"    -U    number of entries in umem\n",
 		prog);
 }
@@ -505,7 +512,7 @@ int main(int argc, char *argv[])
 
 	struct bpf_program *prog;
 
-	while ((opt = getopt(argc, argv, "bB:cdq:rR:l:mMs:U:")) != -1) {
+	while ((opt = getopt(argc, argv, "bB:cCdq:rR:l:mMs:TU:")) != -1) {
 		switch (opt) {
 		case 'b':
 			busy_poll = true;
@@ -516,6 +523,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'c':
 			bind_flags = XDP_USE_NEED_WAKEUP | XDP_COPY;
+			break;
+		case 'C':
+			fill_csum = false;
 			break;
 		case 'd':
 			debug = true;
@@ -544,6 +554,9 @@ int main(int argc, char *argv[])
 		case 's':
 			pkt_size = atoll(optarg);
 			assert(pkt_size < 4096 - 256);
+			break;
+		case 'T':
+			fill_tstamp = false;
 			break;
 		case 'U':
 			umem_size = atoi(optarg);
@@ -581,6 +594,8 @@ int main(int argc, char *argv[])
 	printf(" qid=%d", qid);
 	printf(" bind_flags=%x", bind_flags);
 	printf(" fill_meta=%d", fill_meta);
+	printf(" fill_csum=%d", fill_csum);
+	printf(" fill_tstamp=%d", fill_tstamp);
 	printf(" request_meta=%d", request_meta);
 	printf(" ring_size=%d", ring_size);
 	printf(" umem_size=%d", umem_size);
