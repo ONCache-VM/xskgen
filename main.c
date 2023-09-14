@@ -93,7 +93,7 @@ static int open_xsk(int ifindex, struct xsk *xsk, __u32 qid, int bind_flags)
 	struct xsk_ring_cons *rx = &xsk->rx;
 	struct xdp_mmap_offsets off = {};
 	struct sockaddr_xdp sxdp = {};
-	struct xdp_umem_reg mr = {};
+	struct xdp_umem_reg_v3 mr = {};
 	socklen_t optlen;
 	int optval;
 	void *map;
@@ -116,6 +116,11 @@ static int open_xsk(int ifindex, struct xsk *xsk, __u32 qid, int bind_flags)
 	mr.chunk_size = UMEM_FRAME_SIZE;
 	mr.headroom = 0;
 	mr.flags = 0;
+
+	if (fill_meta) {
+		/* specify tx metadata size */
+		mr.tx_metadata_len = sizeof(struct xsk_tx_metadata);
+	}
 
 	err = setsockopt(xsk->fd, SOL_XDP, XDP_UMEM_REG, &mr, sizeof(mr));
 	if (err)
@@ -208,14 +213,6 @@ static int open_xsk(int ifindex, struct xsk *xsk, __u32 qid, int bind_flags)
 	tx->ring = map + off.tx.desc;
 	tx->cached_prod = *tx->producer;
 	tx->cached_cons = *tx->consumer + ring_size;
-
-	/* specify tx metadata size */
-
-	if (fill_meta) {
-		optval = sizeof(struct xsk_tx_metadata);
-		err = setsockopt(xsk->fd, SOL_XDP, XDP_TX_METADATA_LEN,
-				 &optval, sizeof(optval));
-	}
 
 	if (busy_poll) {
 		/* enable busy poll */
