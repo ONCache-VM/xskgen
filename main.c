@@ -93,7 +93,7 @@ static int open_xsk(int ifindex, struct xsk *xsk, __u32 qid, int bind_flags)
 	struct xsk_ring_cons *rx = &xsk->rx;
 	struct xdp_mmap_offsets off = {};
 	struct sockaddr_xdp sxdp = {};
-	struct xdp_umem_reg_v3 mr = {};
+	struct xdp_umem_reg mr = {};
 	socklen_t optlen;
 	int optval;
 	void *map;
@@ -311,13 +311,13 @@ static void fill_packet(struct xsk *xsk, __u32 idx)
 
 	if (fill_meta) {
 		if (fill_tstamp) {
-			meta->flags |= XDP_TX_METADATA_CHECKSUM;
-			meta->csum_start = sizeof(*eth) + sizeof(*ip6h);
-			meta->csum_offset = offsetof(struct udphdr, check);
+			meta->flags |= XDP_TXMD_FLAGS_CHECKSUM;
+			meta->request.csum_start = sizeof(*eth) + sizeof(*ip6h);
+			meta->request.csum_offset = offsetof(struct udphdr, check);
 		}
 
 		if (fill_csum)
-			meta->flags = XDP_TX_METADATA_TIMESTAMP;
+			meta->flags = XDP_TXMD_FLAGS_TIMESTAMP;
 
 		if (request_meta)
 			tx_desc->options |= XDP_TX_METADATA;
