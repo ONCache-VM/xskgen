@@ -480,16 +480,16 @@ static void usage(const char *prog)
 		"    -b    run in busy polling mode\n"
 		"    -B    number of packets to submit at the same time\n"
 		"    -c    run in copy mode\n"
-		"    -C    do _not_ request checksum offload\n",
+		"    -C    do _not_ request checksum offload\n"
 		"    -d    debug mode: single packet, sleep between them\n"
-		"    -q    rx-tx queue number\n",
-		"    -r    don't install dummy xdp (rx) program\n",
-		"    -R    number of entries in fill/comp/rx/tx rings (per ring)\n",
-		"    -m    request tx offloads\n",
-		"    -M    fill tx offloads but don't set XDP_TX_METADATA\n",
-		"    -l    stop after sending given number of packets\n",
-		"    -s    packet payload size (1400 is default)\n",
-		"    -T    do _not_ request tx timestamp\n",
+		"    -q    rx-tx queue number\n"
+		"    -r    don't install dummy xdp (rx) program\n"
+		"    -R    number of entries in fill/comp/rx/tx rings (per ring)\n"
+		"    -m    request tx offloads\n"
+		"    -M    fill tx offloads but don't set XDP_TX_METADATA\n"
+		"    -l    stop after sending given number of packets\n"
+		"    -s    packet payload size (1400 is default)\n"
+		"    -T    do _not_ request tx timestamp\n"
 		"    -U    number of entries in umem\n",
 		prog);
 }
