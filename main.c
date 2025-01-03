@@ -310,13 +310,13 @@ static void fill_packet(struct xsk *xsk, __u32 idx)
 	memset((void *)(udph + 1), (__u8)idx, pkt_size);
 
 	if (fill_meta) {
-		if (fill_tstamp) {
+		if (fill_csum) {
 			meta->flags |= XDP_TXMD_FLAGS_CHECKSUM;
 			meta->request.csum_start = sizeof(*eth) + sizeof(*ip6h);
 			meta->request.csum_offset = offsetof(struct udphdr, check);
 		}
 
-		if (fill_csum)
+		if (fill_tstamp)
 			meta->flags = XDP_TXMD_FLAGS_TIMESTAMP;
 
 		if (request_meta)
