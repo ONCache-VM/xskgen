@@ -5,8 +5,8 @@
 #ifndef XDP_TX_METADATA
 #define XDP_TX_METADATA				(1 << 1)
 
-#define XDP_TXMD_FLAGS_CHECKSUM			(1 << 0)
-#define XDP_TXMD_FLAGS_TIMESTAMP		(1 << 1)
+#define XDP_TXMD_FLAGS_TIMESTAMP		(1 << 0)
+#define XDP_TXMD_FLAGS_CHECKSUM			(1 << 1)
 
 struct xsk_tx_metadata {
 	__u64 flags;
