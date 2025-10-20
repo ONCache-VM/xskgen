@@ -1,5 +1,5 @@
 all:
-	$(CC) -static main.c -lbpf -lelf -lz -o xskgen
+	$(CC) -static main.c -lbpf -lelf -lz -lzstd -o xskgen
 
 clean:
 	rm xskgen

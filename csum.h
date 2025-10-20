@@ -12,6 +12,19 @@ static __u16 csum_fold(__u32 csum)
 	return (__u16)~csum;
 }
 
+static inline __sum16 csum_ip_magic(const __be32 saddr,
+				    const __be32 daddr,
+				    __u32 len, __u8 proto,
+				    __wsum csum)
+{
+	__u32 s = csum;
+	s += (__u32)saddr;
+	s += (__u32)daddr;
+	s += (__u32)htonl((proto << 16) + len);
+
+	return csum_fold(s);
+}
+
 static inline __sum16 csum_ipv6_magic(const struct in6_addr *saddr,
 				      const struct in6_addr *daddr,
 					__u32 len, __u8 proto,

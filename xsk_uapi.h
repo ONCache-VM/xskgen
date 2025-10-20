@@ -7,6 +7,9 @@
 
 #define XDP_TXMD_FLAGS_TIMESTAMP		(1 << 0)
 #define XDP_TXMD_FLAGS_CHECKSUM			(1 << 1)
+#define XDP_TXMD_FLAGS_SEGMENT_OFFLOAD		(1 << 3)
+
+#define XDP_UMEM_TX_METADATA_LEN	(1 << 2)
 
 struct xsk_tx_metadata {
 	__u64 flags;
@@ -19,6 +22,16 @@ struct xsk_tx_metadata {
 			__u16 csum_start;
 			/* Offset from csum_start where checksum should be stored. */
 			__u16 csum_offset;
+			
+			/* XDP_TXMD_FLAGS_SEGMENT_OFFLOAD */
+			unsigned short	gso_size;
+			__u16	len;
+			__u16 headlen;
+
+			/* XDP_TXMD_FLAGS_LAUNCH_TIME */
+			/* Launch time in nanosecond against the PTP HW Clock */
+			__u64 launch_time;
+
 		} request;
 
 		struct {

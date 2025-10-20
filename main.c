@@ -18,6 +18,7 @@
 #include <linux/filter.h>
 #include <linux/if_ether.h>
 #include <linux/if_link.h>
+#include <linux/ip.h>
 #include <linux/ipv6.h>
 #include <linux/udp.h>
 
@@ -56,6 +57,7 @@
 static bool debug;
 static bool fill_meta;
 static bool fill_csum = true;
+static bool fill_gso = true;
 static bool fill_tstamp = true;
 static bool request_meta;
 static int batch_size = 256;
@@ -79,8 +81,13 @@ struct xsk {
 const char *ifname;
 static __u8 smac[ETH_ALEN];
 static __u8 dmac[ETH_ALEN];
+#ifdef IPV6
 static struct in6_addr saddr;
 static struct in6_addr daddr;
+#else
+static struct in_addr saddr;
+static struct in_addr daddr;
+#endif
 static __u16 sport;
 static __u16 dport;
 
@@ -115,7 +122,7 @@ static int open_xsk(int ifindex, struct xsk *xsk, __u32 qid, int bind_flags)
 	mr.len = umem_size * UMEM_FRAME_SIZE;
 	mr.chunk_size = UMEM_FRAME_SIZE;
 	mr.headroom = 0;
-	mr.flags = 0;
+	mr.flags = XDP_UMEM_TX_METADATA_LEN;
 
 	if (fill_meta) {
 		/* specify tx metadata size */
@@ -267,13 +274,18 @@ static int dummy_rx(int ifindex)
 static void fill_packet(struct xsk *xsk, __u32 idx)
 {
 	struct xsk_tx_metadata *meta;
+#ifdef IPV6
 	struct ipv6hdr *ip6h = NULL;
+#else
+	struct iphdr *iph = NULL;
+#endif
 	struct xdp_desc *tx_desc;
 	struct udphdr *udph;
 	struct ethhdr *eth;
 	void *data;
 	int ret;
 	int len;
+	int iphdr_size;
 
 	tx_desc = xsk_ring_prod__tx_desc(&xsk->tx, idx);
 	tx_desc->addr = idx * UMEM_FRAME_SIZE;
@@ -289,6 +301,7 @@ static void fill_packet(struct xsk *xsk, __u32 idx)
 	eth = data;
 	memcpy(eth->h_dest, dmac, ETH_ALEN);
 	memcpy(eth->h_source, smac, ETH_ALEN);
+#ifdef IPV6
 	eth->h_proto = htons(ETH_P_IPV6);
 
 	ip6h = (void *)(eth + 1);
@@ -307,12 +320,42 @@ static void fill_packet(struct xsk *xsk, __u32 idx)
 	udph->check = ~csum_ipv6_magic(&ip6h->saddr, &ip6h->daddr,
 				       ntohs(udph->len), IPPROTO_UDP, 0);
 
+	iphdr_size = iphdr_size;
+#else
+	eth->h_proto = htons(ETH_P_IP);
+
+	iph = (void *)(eth + 1);
+	iph->ihl = 5;
+	iph->version = 4;
+	iph->tos = 0;
+	iph->tot_len = htons(sizeof(*iph) + sizeof(*udph) + pkt_size);
+	iph->id = 0;
+	iph->frag_off = 0;
+	iph->ttl = 255;
+	iph->protocol = IPPROTO_UDP;
+	iph->check = 0;
+	iph->saddr = saddr.s_addr;
+	iph->daddr = daddr.s_addr;
+
+	udph = (void *)(iph + 1);
+	udph->source = htons(sport);
+	udph->dest = htons(dport);
+	udph->len = htons(sizeof(*udph) + pkt_size);
+
+	udph->check = ~csum_ip_magic(iph->saddr, iph->daddr,
+				       ntohs(udph->len), IPPROTO_UDP, 0);
+
+	iphdr_size = sizeof(*iph);
+#endif
+
 	memset((void *)(udph + 1), (__u8)idx, pkt_size);
+	for (int i = 0; i < pkt_size; i+=0x10)
+		*(__u16 *)((__u64)udph + sizeof(*udph) + i) = (__u16)i;
 
 	if (fill_meta) {
 		if (fill_csum) {
 			meta->flags |= XDP_TXMD_FLAGS_CHECKSUM;
-			meta->request.csum_start = sizeof(*eth) + sizeof(*ip6h);
+			meta->request.csum_start = sizeof(*eth) + iphdr_size;
 			meta->request.csum_offset = offsetof(struct udphdr, check);
 		}
 
@@ -321,10 +364,21 @@ static void fill_packet(struct xsk *xsk, __u32 idx)
 
 		if (request_meta)
 			tx_desc->options |= XDP_TX_METADATA;
+
+			
+		if (fill_gso) {
+			meta->flags |= XDP_TXMD_FLAGS_SEGMENT_OFFLOAD;
+			meta->request.csum_start = sizeof(*eth) + iphdr_size;
+			meta->request.csum_offset = offsetof(struct udphdr, check);
+			meta->request.gso_size = 1400; /* MSS */
+			//meta->request.headlen = sizeof(*eth) + iphdr_size;
+			meta->request.headlen = sizeof(*eth) + iphdr_size + sizeof(struct udphdr); /* Inner header size */
+			meta->request.len = pkt_size;
+		}
 	} else {
 		udph->check = csum_fold(csum_partial(udph, sizeof(*udph) + pkt_size, 0));
 	}
-	tx_desc->len = ETH_HLEN + sizeof(*ip6h) + sizeof(*udph) + pkt_size;
+	tx_desc->len = ETH_HLEN + iphdr_size + sizeof(*udph) + pkt_size;
 }
 
 static void populate_umem(struct xsk *xsk)
@@ -509,7 +563,7 @@ int main(int argc, char *argv[])
 
 	struct bpf_program *prog;
 
-	while ((opt = getopt(argc, argv, "bB:cCdq:rR:l:mMs:TU:")) != -1) {
+	while ((opt = getopt(argc, argv, "bB:cCgdq:rR:l:mMs:TU:")) != -1) {
 		switch (opt) {
 		case 'b':
 			busy_poll = true;
@@ -523,6 +577,9 @@ int main(int argc, char *argv[])
 			break;
 		case 'C':
 			fill_csum = false;
+			break;
+		case 'g':
+			fill_gso = false;
 			break;
 		case 'd':
 			debug = true;
@@ -579,8 +636,13 @@ int main(int argc, char *argv[])
 	sscanf(argv[optind + 2], "%02hhX:%02hhX:%02hhX:%02hhX:%02hhX:%02hhX",
 	       &dmac[0], &dmac[1], &dmac[2], &dmac[3], &dmac[4], &dmac[5]);
 
+#ifdef IPV6
 	inet_pton(AF_INET6, argv[optind + 3], &saddr);
 	inet_pton(AF_INET6, argv[optind + 4], &daddr);
+#else
+	inet_pton(AF_INET, argv[optind + 3], &saddr);
+	inet_pton(AF_INET, argv[optind + 4], &daddr);
+#endif
 
 	sport = atoi(argv[optind + 5]);
 	dport = atoi(argv[optind + 6]);
@@ -596,6 +658,7 @@ int main(int argc, char *argv[])
 	printf(" request_meta=%d", request_meta);
 	printf(" ring_size=%d", ring_size);
 	printf(" umem_size=%d", umem_size);
+	printf(" metadata_size=%d", sizeof(struct xsk_tx_metadata));
 	printf("\n");
 
 	ret = open_xsk(ifindex, &xsk, qid, bind_flags);
