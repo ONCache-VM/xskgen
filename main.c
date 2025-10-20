@@ -545,6 +545,7 @@ static void usage(const char *prog)
 		"    -s    packet payload size (1400 is default)\n"
 		"    -T    do _not_ request tx timestamp\n"
 		"    -U    number of entries in umem\n",
+		"    -g    disable GSO offload\n",
 		prog);
 }
 
